@@ -1,0 +1,259 @@
+import numpy as np
+import pandas as pd
+
+np.set_printoptions(precision=3, suppress=True)
+import os
+import matplotlib.pyplot as plt
+import shutil
+import glob
+import string
+
+alphabet = list(string.ascii_uppercase)
+
+datapathlist = [
+    r"C:\Users\YKassem\Documents\phy\M3_17122025_g0"
+]
+
+savefolderlist = [
+    r"C:\Users\YKassem\Documents\phy\M3_17122025_g0_waveforms"
+]
+
+rawdatapath = r"F:\M3\17122025\M3_17122025_g0\M3_17122025_g0_imec0\catgt"
+
+
+def main(datapathlist, savefolderlist, rawdatapath, value='good', unitmatch=False, phyidname = False):
+    for i, ii in enumerate(datapathlist):
+        datapath = ii
+        savefolder = savefolderlist[i]
+
+        extractSpT(datapath, savefolder, phyidname = phyidname)
+        if unitmatch:
+            extractWF_unitmatchformat(rawdatapath, savefolder)
+        else:
+            extractWF(rawdatapath, savefolder, value=value)
+
+
+def extractSpT(datapath, savefolder, value='good', ksversion=2.5, mod='no', phyidname = False):
+    if not os.path.exists(savefolder):
+        os.mkdir(savefolder)
+    if value == 'good':
+        savepath = savefolder + '/Neurons/'
+    elif value == 'mua':
+        savepath = savefolder + '/MUA/'
+
+    # delete data in existing folder to prevent errors
+    shutil.rmtree(savepath, ignore_errors=True)
+    os.mkdir(savepath)
+
+    # load relevant files
+    channelmap = np.load(datapath + '/channel_map.npy')
+    channelposition = np.load(datapath + '/channel_positions.npy')
+    try:
+        clusterinfo = np.loadtxt(datapath + '/cluster_info.tsv', dtype='str')  # , usecols=(np.arange(0, 30)))
+        clusterheader = clusterinfo[0]
+    except:
+        clusterinfo = pd.read_table(datapath + '/cluster_info.tsv')
+        print('missing values in cluster_info, opening with pandas')
+        clusterheader = clusterinfo.columns.to_numpy()
+        clusterinfo = clusterinfo.to_numpy()
+
+    groupcolumn = np.where(clusterheader == 'group')[0][0]
+    clusterinfo = clusterinfo[clusterinfo[:, groupcolumn] == value]
+    if mod == 'no':
+        allsptime = np.load(datapath + '/spike_times.npy')
+    elif mod == 'yes':
+        allsptime = np.load(datapath + '/spike_times_mod.npy')
+    allclusters = np.load(datapath + '/spike_clusters.npy')
+    header = ['ClusterID', 'FileName', 'Shank', 'XCoord', 'YCoord', 'Channel', 'SpikeNum', 'SameDepthUnits']
+
+    for c, clu in enumerate(clusterinfo):
+        # extract info per cluster
+        chheader = np.where(clusterheader == 'ch')[0][0]
+        channel = int(clu[chheader])
+
+        if ksversion == 1:
+            cluid = np.where(clusterheader == 'cluster_id')[0][0]
+            channelindex = np.where(channelmap == channel)[0][0]
+        elif ksversion == 2 or ksversion == 2.5:
+            try:
+                cluid = np.where(clusterheader == 'cluster_id')[0][0]
+            except:
+                cluid = np.where(clusterheader == 'id')[0][0]
+            channelindex = np.where(channelmap == channel)[1][0]
+
+        clusterID = int(clu[cluid])
+
+        # calculate depth and shank from information
+        depth = int(channelposition[channelindex][1])
+        shank = int(np.round(channelposition[channelindex][0] / 250))
+
+        # extract spiketimes and save in full float format
+        sp = np.array(np.ravel(allsptime[allclusters == clusterID]) / 30, np.float_)
+
+        # calculate how many neurons found at the shank/depth combo
+        onebelow = channelposition[channelindex - 1][1]
+        if depth == onebelow:
+            samechannel = (np.where((np.array(clusterinfo[:, chheader], int) == channel) | (
+                    np.array(clusterinfo[:, chheader], int) == channel - 1)))[0].shape[0]
+        else:
+            samechannel = (np.where((np.array(clusterinfo[:, chheader], int) == channel) | (
+                    np.array(clusterinfo[:, chheader], int) == channel + 1)))[0].shape[0]
+
+        # save neuronal spiketimes with appropriate name depth(um)_shank(0-3)_ABC
+        for i in range(samechannel):
+            if os.path.exists(savepath + str(depth) + '_' + str(shank) + '_' + alphabet[i] + '.npy'):
+                j = 0
+            else:
+                if phyidname:
+                    np.save(savepath + str(clusterID) + '.npy', sp)
+                else:
+                    np.save(savepath + str(depth) + '_' + str(shank) + '_' + alphabet[i] + '.npy', sp)
+                break
+
+        # create csv file with all information for save
+        title = str(depth) + '_' + str(shank) + '_' + alphabet[i]
+        cluinfo = np.hstack((
+            clusterID, title, shank, channelposition[channelindex][0], channelposition[channelindex][1],
+            channel, clu[-2], samechannel))
+        header = np.vstack((header, cluinfo))
+
+    np.savetxt(savefolder + '/neuroninfo_' + value + '.csv', header, delimiter=',', fmt='%s')
+    print('extract SpikeT done')
+
+
+def extractWF(rawdatapath, savefolder, value='good', probeChNum=385):
+    # update folder directories
+    if value == 'good':
+        infopath = savefolder + '/neuroninfo_good.csv'
+        sppath = savefolder + '/Neurons/'
+        savepath = savefolder + '/Neurons_wf/'
+    elif value == 'mua':
+        infopath = savefolder + '/neuroninfo_MUA.csv'
+        sppath = savefolder + '/MUA/'
+        savepath = savefolder + '/MUA_wf/'
+
+    shutil.rmtree(savepath, ignore_errors=True)
+    os.mkdir(savepath)
+
+    # set up initial values
+    rawdata = glob.glob(rawdatapath + '/*.bin')[0]
+    info = np.loadtxt(infopath, delimiter=',', dtype=str)
+    # probeChNum = 385
+    waveformNumExport = 1000
+
+    # loop through each neuron
+    for n, neu in enumerate(info[1:]):
+        savename = neu[1]
+        channel = int(neu[5])
+        cumulativeWaveform = np.zeros((probeChNum, 60)).T
+        spaikai = np.array(np.load(sppath + savename + '.npy') * 30, int)
+
+        if len(spaikai) > waveformNumExport:
+            numSpikes = waveformNumExport
+        else:
+            numSpikes = len(spaikai)
+
+        # choose 1000 random spiketimes to compute mean wf and save
+        spikeValue = np.random.choice(spaikai.flatten(), size=numSpikes, replace=False) - 20
+        for j, jj in enumerate(spikeValue):
+            data = np.memmap(rawdata, np.int16, mode='r+', shape=(60, probeChNum),
+                             offset=int(jj) * probeChNum * 2)
+            cumulativeWaveform = cumulativeWaveform + data
+            del data
+        meanWaveform = cumulativeWaveform / numSpikes
+        np.save(savepath + savename + '.npy', meanWaveform)
+
+        # create plot of mean waveform from -10 to +10 channels
+        plt.close()
+        fig, ax = plt.subplots(1, 2, figsize=(6, 3), facecolor='white')
+        wfheatmap = np.zeros(60)
+        for i, ii in enumerate(np.arange(-15, 15)):
+            row = channel + ii
+            if row > probeChNum - 1:
+                continue
+            else:
+                ax[0].plot(meanWaveform.T[row])
+                wfheatmap = np.vstack((wfheatmap, meanWaveform.T[row]))
+
+        wfheatmap = wfheatmap[1:]
+        ax[1].imshow(wfheatmap, aspect='auto', interpolation='None')
+        ax[1].grid(False)
+        ax[0].grid(False)
+        plt.savefig(savepath + savename + '_plot.png', dpi=300)
+    print('extract WF done')
+
+
+def extractWF_unitmatchformat(rawdatapath, savefolder, probeChNum=385):
+    # update folder directories
+    infopath = savefolder + '/neuroninfo_good.csv'
+    sppath = savefolder + '/Neurons/'
+    savepath = savefolder + '/Neurons_wf_um/'
+
+    shutil.rmtree(savepath, ignore_errors=True)
+    os.mkdir(savepath)
+
+    # set up initial values
+    rawdata = glob.glob(rawdatapath + '*.bin')[0]
+    info = np.loadtxt(infopath, delimiter=',', dtype=str)
+    # probeChNum = 385
+    waveformNumExport = 500
+
+    # loop through each neuron
+    for n, neu in enumerate(info[1:]):
+        savename = neu[0]
+        um_savename = 'Unit'+str(neu[0])
+
+        channel = int(neu[5])
+        cumulativeWaveform = np.zeros((probeChNum, 82)).T
+        spaikai = np.array(np.load(sppath + savename + '.npy') * 30, int)
+
+        halfrecording = int(len(spaikai) / 2)
+
+        if len(spaikai[:halfrecording]) > waveformNumExport:
+            numSpikes1 = waveformNumExport
+        else:
+            numSpikes1 = len(spaikai[:halfrecording])
+
+        if len(spaikai[halfrecording:]) > waveformNumExport:
+            numSpikes2 = waveformNumExport
+        else:
+            numSpikes2 = len(spaikai[halfrecording:])
+
+        spikeValue1 = np.random.choice(spaikai[:halfrecording].flatten(), size = numSpikes1, replace=False) - 41
+        spikeValue2 = np.random.choice(spaikai[halfrecording:].flatten(), size = numSpikes2, replace=False) - 41
+
+        for j, jj in enumerate(spikeValue1):
+            data = np.memmap(rawdata, np.int16, mode='r+', shape=(82, probeChNum),
+                             offset=int(jj) * probeChNum * 2)
+            cumulativeWaveform = cumulativeWaveform + data
+            del data
+        meanWaveform1 = cumulativeWaveform / numSpikes1
+        for j, jj in enumerate(spikeValue2):
+            data = np.memmap(rawdata, np.int16, mode='r+', shape=(82, probeChNum), offset=int(jj) * probeChNum * 2)
+            cumulativeWaveform = cumulativeWaveform + data
+            del data
+        meanWaveform2 = cumulativeWaveform / numSpikes2
+
+        combinedmeanWf = np.dstack((meanWaveform1, meanWaveform2))
+        np.save(savepath + um_savename + '_RawSpikes.npy', combinedmeanWf)
+
+        # create plot of mean waveform from -10 to +10 channels
+        #plt.close()
+        #fig, ax = plt.subplots(1, 2, figsize=(6, 3), facecolor='white')
+        #wfheatmap = np.zeros(60)
+        #for i, ii in enumerate(np.arange(-15, 15)):
+            #row = channel + ii
+            #if row > probeChNum - 1:
+                #continue
+            #else:
+                #ax[0].plot(meanWaveform.T[row])
+                #wfheatmap = np.vstack((wfheatmap, meanWaveform.T[row]))
+
+        #wfheatmap = wfheatmap[1:]
+        #ax[1].imshow(wfheatmap, aspect='auto', interpolation='None')
+        #ax[1].grid(False)
+        #ax[0].grid(False)
+        #plt.savefig(savepath + savename + '_plot.png', dpi=300)
+    print('extract WF done')
+
+main(datapathlist, savefolderlist, rawdatapath)
