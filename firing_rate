@@ -1,0 +1,100 @@
+###try it with one neurons, add extraction sampling times and aligning it with it.
+### Then make it a loop for all neurons
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
+import glob
+import os
+
+# paths
+neuron_folder = r"C:\Users\YKassem\Documents\kilosort_for_phy\M3_18122025_waveforms\Neurons"
+sampling_file = r"C:\Users\YKassem\Documents\M3 VIDEOS\18122025\Camera1_2025-12-18T14_31_59_annotation_set5.npy"
+
+# load sampling once
+sampling = np.load(sampling_file)
+fps = 30
+
+sampling_indices = np.where(sampling == 'engagement')[0]
+sampling_times = sampling_indices / fps
+
+# camera started 31.415920 s after neural recording began for M3 18122025
+camera_start_offset = 31.415920
+
+# shift behavioral timestamps into neural timebase
+sampling_times = sampling_times + camera_start_offset
+
+# epochs = [
+#     (350, 678),
+#     (1285, 1629),
+#     (2284, 2630),
+#     (3253, 3658),
+#     (4278, 4710)
+# ]
+
+# get all neuron files
+neuron_files = glob.glob(os.path.join(neuron_folder, "*.npy"))
+
+# loop through neurons
+for file in neuron_files:
+    sp = np.load(file)
+
+    # convert to seconds
+    sp_sec = sp / 1000
+
+    if len(sp_sec) == 0:
+        continue
+
+    # binning
+    bin_size = 1  # seconds
+    bins = np.arange(0, sp_sec.max() + bin_size, bin_size)
+
+    counts, edges = np.histogram(sp_sec, bins=bins)
+    firing_rate = counts / bin_size
+    smoothed = gaussian_filter1d(firing_rate, sigma=10)
+
+    # plot
+    # fig, ax = plt.subplots()
+    #
+    # ax.plot(edges[:-1], smoothed, label="Firing rate")
+    #
+    # # sampling overlay
+    # for t in sampling_times:
+    #     ax.axvspan(t, t + 0.1, color='lightcoral', alpha=0.05)
+    #
+    # ax.set_xlim(0, sp_sec.max())
+    # neuron_name = os.path.basename(file)
+    # ax.set_title(f"Firing rate - {neuron_name}")
+    # ax.set_xlabel("Time (s)")
+    # ax.set_ylabel("Firing rate (Hz)")
+    # ax.legend()
+
+    # plot
+    plt.figure()
+
+    plt.plot(edges[:-1], smoothed, label="Firing rate")
+
+    # sampling overlay (faint background)
+    for t in sampling_times:
+        plt.axvspan(t, t + 0.1, color='lightcoral', alpha=0.05)
+
+    print(plt.gca())
+
+    # for i, (start, end) in enumerate(epochs):
+    #     plt.axvspan(start, end, color='orange', alpha=0.2)
+    #
+    #     # optional: label each epoch
+    #     plt.text(start, np.max(smoothed), f"E{i + 1}",
+    #              verticalalignment='top', fontsize=8)
+
+    # labels + title using filename
+    neuron_name = os.path.basename(file)
+    plt.title(f"Firing rate - {neuron_name}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Firing rate (Hz)")
+    plt.legend()
+
+    # optional: save instead of show
+    save_path = os.path.join(neuron_folder, neuron_name.replace(".npy", ".png"))
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
