@@ -1,0 +1,540 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
+import glob
+import os
+from matplotlib.gridspec import GridSpec
+
+# paths
+neuron_folder = r"C:\Users\YKassem\Documents\kilosort_for_phy\M3_18122025_waveforms\Neurons"
+sampling_file = r"C:\Users\YKassem\Documents\M3 VIDEOS\18122025\Camera1_2025-12-18T14_31_59_annotation_set5.npy"
+waveform_folder = r"C:\Users\YKassem\Documents\kilosort_for_phy\M3_18122025_waveforms\Neurons_wf"
+led_on_file = r"D:\SocialMemory_Neural\Ephys\M3\M3_18122025_g1\M3_18122025_g1_tcat.nidq.xd_0_6_0.txt"
+led_off_file = r"D:\SocialMemory_Neural\Ephys\M3\M3_18122025_g1\M3_18122025_g1_tcat.nidq.xid_0_6_0.txt"
+
+# plotting the firing rate
+# load sampling once
+sampling = np.load(sampling_file)
+fps = 30
+
+sampling_indices = np.where(sampling == 'engagement')[0]
+sampling_times = sampling_indices / fps
+
+# camera started 31.415920 s after neural recording began for M3 18122025
+camera_start_offset = 31.415920
+
+# shift behavioral timestamps into neural timebase
+sampling_times = sampling_times + camera_start_offset
+
+# get all neuron files
+neuron_files = glob.glob(os.path.join(neuron_folder, "*.npy"))
+
+
+# =========================
+# LOAD EVENTS
+# =========================
+led_on = np.loadtxt(led_on_file)
+led_off = np.loadtxt(led_off_file)
+
+# =========================
+# DEFINE REWARDED TRIALS
+# =========================
+
+# if LED duration < 5 sec -> rewarded
+durations = led_off - led_on
+rewarded = durations < 4.99
+
+# =========================
+# PSTH PARAMETERS
+# =========================
+
+pre_time = 5
+post_time = 10
+
+bin_size = 0.2
+sigma = 1
+
+bins = np.arange(-pre_time, post_time + bin_size, bin_size)
+time_axis = bins[:-1]
+
+# =========================
+# LOAD NEURONS
+# =========================
+
+neuron_files = glob.glob(os.path.join(neuron_folder, "*.npy"))
+
+save_folder = os.path.join(neuron_folder, "PSTHs")
+os.makedirs(save_folder, exist_ok=True)
+
+classification_results = []
+
+# =========================
+# LOOP THROUGH NEURONS
+# =========================
+
+for file in neuron_files:
+
+    neuron_name = os.path.basename(file).replace(".npy", "")
+
+    sp = np.load(file)
+
+    if len(sp) == 0:
+        continue
+
+    # convert ms -> sec
+    sp_sec = sp / 1000
+
+    # create figure
+    fig = plt.figure(figsize=(18, 10))
+
+    gs = GridSpec(
+        3, 2,
+        figure=fig,
+        width_ratios=[1, 2]
+    )
+
+    ax_waveform = fig.add_subplot(gs[0, 0])
+    ax_acg = fig.add_subplot(gs[1, 0])
+    ax_fr = fig.add_subplot(gs[2, 0])
+
+    led_gs = gs[:, 1].subgridspec(
+        3, 1,
+        height_ratios=[1, 2, 1]
+    )
+
+    ax1 = fig.add_subplot(led_gs[0])  # LED ON PSTH
+    ax2 = fig.add_subplot(led_gs[1])  # Raster
+    ax3 = fig.add_subplot(led_gs[2])  # LED OFF PSTH
+
+    # plotting waveform
+    wf_file = os.path.join(
+        waveform_folder,
+        neuron_name + ".npy"
+    )
+
+    if os.path.exists(wf_file):
+
+        meanWaveform = np.load(wf_file)
+
+        # find channel with largest waveform
+        peak_channel = np.argmax(
+            np.max(np.abs(meanWaveform), axis=0)
+        )
+
+        for offset in range(-15, 15):
+
+            ch = peak_channel + offset
+
+            if ch < 0 or ch >= meanWaveform.shape[1]:
+                continue
+
+            sampling_rate = 30000
+
+            time_ms = (
+                    np.arange(meanWaveform.shape[0])
+                    / sampling_rate
+                    * 1000
+            )
+
+            ax_waveform.plot(
+                time_ms,
+                meanWaveform[:, ch]
+            )
+
+
+        ax_waveform.set_title("Waveform")
+        ax_waveform.set_xlabel("Time (ms)")
+        ax_waveform.set_ylabel("Amplitude")
+        ax_waveform.grid(False)
+
+    # plotting autocorrelolgram
+    max_lag = 0.1
+    bin_width = 0.001
+
+    diffs = []
+
+    for i in range(len(sp_sec)):
+        dt = sp_sec - sp_sec[i]
+
+        dt = dt[
+            (dt >= -max_lag) &
+            (dt <= max_lag) &
+            (dt != 0)
+            ]
+
+        diffs.extend(dt)
+
+    diffs = np.array(diffs)
+
+    acg_bins = np.arange(
+        -max_lag,
+        max_lag + bin_width,
+        bin_width
+    )
+
+    acg_counts, acg_edges = np.histogram(
+        diffs,
+        bins=acg_bins
+    )
+
+    ax_acg.bar(
+        acg_edges[:-1] * 1000,
+        acg_counts,
+        width=bin_width * 1000
+    )
+
+    ax_acg.axvline(
+        0,
+        color='red'
+    )
+
+    ax_acg.set_title("Autocorrelogram")
+    ax_acg.set_xlabel("Lag (ms)")
+    ax_acg.set_ylabel("Count")
+
+    # plotting firing rate
+    bin_size_fr = 1
+
+    fr_bins = np.arange(
+        0,
+        sp_sec.max() + bin_size_fr,
+        bin_size_fr
+    )
+
+    counts, fr_edges = np.histogram(
+        sp_sec,
+        bins=fr_bins
+    )
+
+    firing_rate = counts / bin_size_fr
+
+    smoothed = gaussian_filter1d(
+        firing_rate,
+        sigma=10
+    )
+
+    ax_fr.plot(
+        fr_edges[:-1],
+        smoothed,
+        color='black',
+        label="Firing rate"
+    )
+
+    ax_fr.set_xlim(0, sp_sec.max())
+    ax_fr.margins(x=0)
+
+    for t in sampling_times:
+        ax_fr.axvspan(
+            t,
+            t + 0.1,
+            color='lightcoral',
+            alpha=0.05
+        )
+    print(plt.gca())
+
+    ax_fr.set_title("Firing Rate")
+    ax_fr.set_xlabel("Time (s)")
+    ax_fr.set_ylabel("Hz")
+
+    # =========================
+    # PROCESS LED ON TRIALS
+    # =========================
+
+    trial_rates = []
+    raster_spikes = []
+
+    for trial_idx, event_time in enumerate(led_on):
+        aligned_spikes = sp_sec - event_time
+
+        aligned_spikes_window = aligned_spikes[
+            (aligned_spikes >= -pre_time) &
+            (aligned_spikes <= post_time)
+            ]
+
+        raster_spikes.append(aligned_spikes_window)
+
+        counts, _ = np.histogram(aligned_spikes_window, bins=bins)
+
+        firing_rate = counts / bin_size
+
+        # smooth single trial
+        firing_rate = gaussian_filter1d(firing_rate, sigma=sigma)
+
+        trial_rates.append(firing_rate)
+
+    trial_rates = np.array(trial_rates)
+
+    # =========================
+    # POOLED BASELINE
+    # =========================
+
+    baseline_idx = (time_axis >= -5) & (time_axis < 0)
+
+    # collect ALL baseline bins from ALL trials
+    pooled_baseline = trial_rates[:, baseline_idx].flatten()
+
+    baseline_mean = np.mean(pooled_baseline)
+    baseline_std = np.std(pooled_baseline)
+
+    # avoid divide-by-zero
+    if baseline_std == 0:
+        baseline_std = 1
+
+    # =========================
+    # Z-SCORE ALL TRIALS
+    # =========================
+
+    trial_rates_z = (
+                            trial_rates - baseline_mean
+                    ) / baseline_std
+
+    # =========================
+    # MEAN PSTHs
+    # rewarded vs unrewarded
+    # =========================
+
+    rewarded_rates = trial_rates_z[rewarded]
+    unrewarded_rates = trial_rates_z[~rewarded]
+
+    mean_rate_rewarded = np.mean(rewarded_rates, axis=0)
+    mean_rate_unrewarded = np.mean(unrewarded_rates, axis=0)
+
+    # =========================
+    # CLASSIFY RESPONSE
+    # using actual LED duration
+    # =========================
+
+    baseline_values = []
+    led_values = []
+
+    for trial_idx in range(len(led_on)):
+
+        duration = led_off[trial_idx] - led_on[trial_idx]
+
+        # baseline window
+        baseline_idx = (
+                (time_axis >= -5) &
+                (time_axis < 0)
+        )
+
+        # LED ON window
+        led_idx = (
+                (time_axis >= 0) &
+                (time_axis <= duration)
+        )
+
+        # skip weird trials
+        if np.sum(led_idx) == 0:
+            continue
+
+        baseline_values.append(
+            np.mean(trial_rates_z[trial_idx][baseline_idx])
+        )
+
+        led_values.append(
+            np.mean(trial_rates_z[trial_idx][led_idx])
+        )
+
+    # average across trials
+    baseline_mean = np.mean(baseline_values)
+    led_mean = np.mean(led_values)
+
+    delta = led_mean - baseline_mean
+
+
+    # =========================
+    # LED OFF ALIGNED ANALYSIS
+    # =========================
+
+    off_pre = 10
+    off_post = 10
+
+    off_bins = np.arange(-off_pre, off_post + bin_size, bin_size)
+    off_time_axis = off_bins[:-1]
+
+    off_trial_rates = []
+    off_raster_spikes = []
+
+    for trial_idx, event_time in enumerate(led_off):
+        aligned_spikes = sp_sec - event_time
+
+        aligned_spikes_window = aligned_spikes[
+            (aligned_spikes >= -off_pre) &
+            (aligned_spikes <= off_post)
+            ]
+
+        off_raster_spikes.append(aligned_spikes_window)
+
+        counts, _ = np.histogram(aligned_spikes_window, bins=off_bins)
+
+        firing_rate = counts / bin_size
+
+        firing_rate = gaussian_filter1d(firing_rate, sigma=sigma)
+
+        off_trial_rates.append(firing_rate)
+
+    off_trial_rates = np.array(off_trial_rates)
+
+    # =========================
+    # USE SAME POOLED BASELINE
+    # =========================
+
+    off_trial_rates_z = (
+                                off_trial_rates - baseline_mean
+                        ) / baseline_std
+
+    off_mean_rate = np.mean(off_trial_rates_z, axis=0)
+
+    off_post_idx = (
+            (off_time_axis >= 0) &
+            (off_time_axis <= 15)
+    )
+
+    off_post_mean = np.mean(off_mean_rate[off_post_idx])
+
+    classification_results.append([
+        neuron_name,
+        baseline_mean,
+        led_mean,
+        delta,
+        off_post_mean,
+    ])
+
+    # OFF PSTHs
+    off_rewarded_rates = off_trial_rates_z[rewarded]
+    off_unrewarded_rates = off_trial_rates_z[~rewarded]
+
+    off_mean_rewarded = np.mean(off_rewarded_rates, axis=0)
+    off_mean_unrewarded = np.mean(off_unrewarded_rates, axis=0)
+
+    # =========================
+    # SORT TRIALS by LED duration
+    # shortest to longest
+    # =========================
+
+    durations = led_off - led_on
+    sorted_idx = np.argsort(durations)
+
+    # reorder everything
+    raster_spikes = [raster_spikes[i] for i in sorted_idx]
+
+    trial_rates = trial_rates_z[sorted_idx]
+
+    sorted_rewarded = rewarded[sorted_idx]
+
+    sorted_durations = durations[sorted_idx]
+
+    # -------------------------
+    # TOP: MEAN LED PSTH
+    # -------------------------
+
+    ax1.plot(
+        time_axis,
+        mean_rate_rewarded,
+        color='green',
+        linewidth=2,
+        label='Rewarded'
+    )
+
+    ax1.plot(
+        time_axis,
+        mean_rate_unrewarded,
+        color='black',
+        linewidth=2,
+        label='Unrewarded'
+    )
+
+    ax1.legend()
+
+    ax1.axvline(0, color='red', linestyle='--')
+
+    ax1.set_ylabel("Z-score")
+    ax1.set_title(neuron_name + " (LED ON aligned)")
+
+    # -------------------------
+    # BOTTOM: RASTER
+    # -------------------------
+
+    for trial_idx, spikes in enumerate(raster_spikes):
+
+        # rewarded = green
+        # unrewarded = black
+
+        color = 'green' if sorted_rewarded[trial_idx] else 'black'
+
+        ax2.vlines(
+            spikes,
+            trial_idx + 0.5,
+            trial_idx + 1.5,
+            color=color,
+            linewidth=1
+        )
+
+        # LED OFF marker
+        led_off_time = sorted_durations[trial_idx]
+
+        ax2.plot(
+            led_off_time,
+            trial_idx + 1,
+            marker='|',
+            color='red',
+            markersize=12,
+            markeredgewidth=2
+        )
+
+    ax2.axvline(0, color='red', linestyle='--')
+
+    ax2.set_ylabel("Trials")
+    ax2.set_xlabel("Time from LED onset (s)")
+
+    # legend
+    from matplotlib.lines import Line2D
+
+    legend_elements = [
+        Line2D([0], [0], color='green', lw=2, label='Rewarded'),
+        Line2D([0], [0], color='black', lw=2, label='Unrewarded')
+    ]
+
+    ax2.legend(handles=legend_elements, loc='upper right')
+
+    # =========================
+    # BOTTOM: MEAN PSTH (LED OFF)
+    # =========================
+
+    ax3.plot(
+        off_time_axis,
+        off_mean_rewarded,
+        color='green',
+        linewidth=2,
+        label='Rewarded'
+    )
+
+    ax3.plot(
+        off_time_axis,
+        off_mean_unrewarded,
+        color='black',
+        linewidth=2,
+        label='Unrewarded'
+    )
+    ax3.axvline(0, color='red', linestyle='--')
+
+    ax3.set_ylabel("Z-score")
+    ax3.set_xlabel("Time from LED offset (s)")
+    ax3.set_title("LED OFF aligned")
+
+    plt.tight_layout()
+
+    # =========================
+    # SAVE FIGURE
+    # =========================
+
+    save_path = os.path.join(
+        save_folder,
+        f"{neuron_name}_summary.png"
+    )
+
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+print("Done.")
+
