@@ -1,0 +1,167 @@
+import numpy as np
+import glob
+import os
+from scipy.ndimage import gaussian_filter1d
+import matplotlib.pyplot as plt
+
+neuron_folder = r"C:\Users\YKassem\Documents\kilosort_for_phy\M1_18122025_waveforms\Neurons"
+sampling_file = r"C:\Users\YKassem\Documents\M1 VIDEOS\Camera1_2025-12-18T11_40_08_annotation_set5.npy"
+
+sampling = np.load(sampling_file)
+fps = 30
+camera_start_offset = 29.860400
+start_idx = np.where(sampling == 'start')[0]
+end_idx = np.where(sampling == 'end')[0]
+
+# group into epochs based on time gaps
+gap_threshold = 300  # seconds (adjust if needed)
+
+# define epochs based on first start and end labels in video
+epochs = []
+
+i = 0
+N = len(sampling)
+
+while i < N:
+
+    # 1. find next 'start'
+    while i < N and sampling[i] != 'start':
+        i += 1
+
+    if i >= N:
+        break
+
+    start_idx = i
+
+    # 2. now find the FIRST 'end' after this start
+    i += 1
+    while i < N and sampling[i] != 'end':
+        i += 1
+
+    if i >= N:
+        break
+
+    end_idx = i
+
+    # convert to neural-aligned timestamps
+    start_time = (start_idx / fps) + camera_start_offset
+    end_time = (end_idx / fps) + camera_start_offset
+
+    epochs.append((start_time, end_time))
+
+    # 4. move forward AFTER this end
+    i += 1
+
+for i, (start, end) in enumerate(epochs):
+    print(f"E{i+1}: {start:.2f}s → {end:.2f}s  (duration: {end-start:.2f}s)")
+
+# this is for the unsynced videos M3 17122025
+# epochs = [
+#     (350, 678),
+#     (1285, 1629),
+#     (2284, 2630),
+#     (3253, 3658),
+#     (4278, 4710)
+# ]
+
+neuron_files = glob.glob(os.path.join(neuron_folder, "*.npy"))
+
+all_rates = []
+
+# determine full recording duration from neural data
+all_spikes = []
+
+for file in neuron_files:
+    sp = np.load(file)
+    if len(sp) == 0:
+        continue
+    all_spikes.append(sp / 1000)
+
+global_max_time = max([s.max() for s in all_spikes])
+
+bin_size = 0.2
+bins = np.arange(0, global_max_time + bin_size, bin_size)
+time_bins = bins[:-1]
+
+
+for file in neuron_files:
+    sp = np.load(file)
+
+    if len(sp) == 0:
+        continue
+
+    sp_sec = sp / 1000
+
+    counts, _ = np.histogram(sp_sec, bins=bins)
+    firing_rate = counts / bin_size
+
+    smoothed = gaussian_filter1d(firing_rate, sigma=1)
+
+    # add padding to match length of all neurons
+    if len(smoothed) < len(time_bins):
+        smoothed = np.pad(smoothed, (0, len(time_bins) - len(smoothed)))
+    elif len(smoothed) > len(time_bins):
+        smoothed = smoothed[:len(time_bins)]
+
+    baseline_start = 0
+    baseline_end = epochs[0][0]
+
+    baseline_idx = np.where(
+        (time_bins >= baseline_start) &
+        (time_bins < baseline_end)
+    )[0]
+
+    baseline_mean = np.mean(smoothed[baseline_idx])
+    baseline_std = np.std(smoothed[baseline_idx])
+
+    if baseline_std > 0:
+        smoothed = (smoothed - baseline_mean) / baseline_std
+    else:
+        smoothed = smoothed - baseline_mean
+
+    all_rates.append(smoothed)
+
+V = np.array(all_rates)   # neurons x time
+keep = np.std(V, axis=1) > 0.5 #removes silent neurons, can make criteria higher by changing to 0.5
+V = V[keep]
+
+# # 2. now z-score each neuron across FULL session
+# V = (V - np.mean(V, axis=1, keepdims=True)) / (np.std(V, axis=1, keepdims=True) + 1e-12)
+
+# sort by peak activity time
+def get_idx(start, end):
+    return np.where((time_bins >= start) & (time_bins < end))[0]
+
+idx_E5 = get_idx(*epochs[-1])
+
+response = np.mean(V[:, idx_E5], axis=1)
+sort_idx = np.argsort(response)
+
+V_sorted = V[sort_idx]
+
+plt.figure(figsize=(12, 6))
+
+vmin, vmax = np.percentile(V_sorted, [5, 95])
+
+plt.imshow(V_sorted, aspect='auto', cmap='viridis',
+           vmin=vmin,
+           vmax=vmax,
+           extent=[time_bins[0], time_bins[-1], 0, V_sorted.shape[0]], interpolation='nearest')
+
+
+
+
+plt.colorbar(label="Z-scored firing rate")
+
+for i, (start, end) in enumerate(epochs):
+    plt.axvline(start, color='white', linestyle='--')
+    plt.text(start, V_sorted.shape[0]*0.95, f"E{i+1}", color='white')
+
+    plt.axvline(end, color='red', linestyle=':')
+
+
+plt.xlabel("Time (s)")
+plt.ylabel("Neurons")
+plt.title("Population activity heatmap")
+
+plt.show()
