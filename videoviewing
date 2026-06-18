@@ -1,0 +1,246 @@
+import os.path
+from tkinter import *
+
+import cv2
+import numpy as np
+import imutils
+import warnings
+import colorsys
+from tkinter import filedialog as fd
+
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+
+
+def flick(x):
+    pass
+
+
+def basicControls(key, speed, i, framejump):
+    if key == 'speedup':
+        speed = speed - 5
+        if speed < 1:
+            speed = 1
+        cv2.setTrackbarPos('Framerate', 'controls', speed)
+        key = 'play'
+    if key == 'slowdown':
+        speed = speed + 5
+        cv2.setTrackbarPos('Framerate', 'controls', speed)
+        key = 'play'
+    if key == 'rewind':
+        i -= 1
+        cv2.setTrackbarPos('Video', 'controls', i)
+        key = 'pause'
+    if key == 'fastforward':
+        i += 1
+        cv2.setTrackbarPos('Video', 'controls', i)
+        key = 'pause'
+    if key == 'ffastforward':
+        i += framejump
+        cv2.setTrackbarPos('Video', 'controls', i)
+        key = 'pause'
+    if key == 'rrewind':
+        i -= framejump
+        cv2.setTrackbarPos('Video', 'controls', i)
+        key = 'pause'
+
+    return key, speed, i
+
+
+def behaviorLabels(listnumber):
+    if listnumber == 1:
+        labels = 'Conspecific #1 1: Headhead, 2: Anogenital, 3: GeneralSniff, 4: Approach, 5: Leaving, 6: Dominance, 7: Passive, 8: Following, 9: Transition, 0: nan'
+        behaviorkeys = {ord('1'): 'headhead', ord('2'): 'anogenital', ord('3'): 'sniff', ord('4'): 'approach',
+                        ord('5'): 'leave', ord('6'): 'dominance', ord('7'): 'passive', ord('8'): 'follow',
+                        ord('9'): 'transition',
+                        ord('0'): 'nan'}
+    if listnumber == 2:
+        labels = 'Conspecific #2 1: Headhead, 2: Anogenital, 3: GeneralSniff, 4: Approach, 5: Leaving, 6: Dominance, 7: Passive, 8: Following, 9: Allogrooming, 0: nan'
+        behaviorkeys = {ord('1'): 'headhead', ord('2'): 'anogenital', ord('3'): 'sniff', ord('4'): 'approach',
+                        ord('5'): 'leave', ord('6'): 'dominance', ord('7'): 'passive', ord('8'): 'follow',
+                        ord('9'): 'allogroom',
+                        ord('0'): 'nan'}
+    if listnumber == 3:
+        labels = '1: Start Analysis, 2: Stop Analysis, 3: Intervention'
+        behaviorkeys = {ord('1'): 'Start Analysis', ord('2'): 'Stop Analysis', ord('3'): 'Intervention',
+                        ord('0'): 'nan'}
+    if listnumber == 4:
+        labels = 'Nonsocial 1: rearing, 2: self-grooming 2, 3: scratching, 0: nan'
+        behaviorkeys = {ord('1'): 'rearing', ord('2'): 'groom', ord('3'): 'scratch', ord('0'): 'nan'}
+    if listnumber == 5:
+        labels = '1: engagement, 2: other, 3: START, 4: END, 0: nan'
+        behaviorkeys = {ord('1'): 'engagement', ord('2'): 'other', ord('3'): 'start', ord('4'): 'end', ord('0'): 'nan'}
+    if listnumber == 6:
+        labels = '1: rewarded_odor, 2: unrewarded_odor'
+        behaviorkeys = {ord('1'): 'rewarded_odor', ord('2'): 'unrewarded_odor', ord('0'): 'nan'}
+    if listnumber == 7:
+        labels = '1: start-male, 2: stop-male, 3: start-female, 4: stop-female, 5: start-toy, 6: stop-toy, 7: start-food, 8: stop-food, 9: intervention, 0: nan'
+        behaviorkeys = {ord('1'): 'start-male', ord('2'): 'stop-male', ord('3'): 'start-female',
+                        ord('4'): 'stop-female', ord('5'): 'start-toy', ord('6'): 'stop-toy', ord('7'): 'start-food',
+                        ord('8'): 'stop-food', ord('9'): 'intervention', ord('0'): 'nan'}
+    if listnumber == 8:
+        labels = '1: Headhead, 2: Anogenital, 3: GeneralSniff, 4: Approach, 5: Leaving, 6: Pushing, 7: Passive, 8: Following, 9: Transition, 0: nan'
+        behaviorkeys = {ord('1'): 'headhead', ord('2'): 'anogenital', ord('3'): 'sniff', ord('4'): 'approach',
+                        ord('5'): 'leave', ord('6'): 'dominance', ord('7'): 'passive', ord('8'): 'follow',
+                        ord('9'): 'transition',
+                        ord('0'): 'nan'}
+    if listnumber == 9:
+        labels = '1: start-rewardedmale, 2: contact-rewardedmale, 3: stop-rewardedmale, ' \
+                 '4: start-unrewardedmale, 5: contact-unrewardedmale, 6: stop-unrewardedmale, ' \
+                 '7: start-novelmale, 8: contact-novelmale, 9: stop-novelmale, ' \
+                 'j: start-female, k: contact-female, l: stop-female'
+        behaviorkeys = {ord('1'): 'start-rewardedmale', ord('2'): 'contact-rewardedmale', ord('3'): 'stop-rewardedmale',
+                        ord('4'): 'start-unrewardedmale', ord('5'): 'contact-unrewardedmale', ord('6'): 'stop-unrewardedmale',
+                        ord('7'): 'start-novelmale', ord('8'): 'contact-novelmale', ord('9'): 'stop-novelmale',
+                        ord('j'): 'start-female', ord('k'): 'contact-female', ord('l'): 'stop-female',
+                        ord('0'): 'nan'}
+
+    if listnumber == 10:
+        labels = '1: start stimulus, 2: stop stimulus'
+        behaviorkeys = {ord('1'): 'start', ord('2'): 'stop', ord('0'): 'nan'}
+
+    return labels, behaviorkeys
+
+
+def addTracking(frame, xcoords, ycoords, probability, numbodyparts, i, reducefrac, threshold=.9):
+    HSV_tuples = [(x / numbodyparts, 1, .75) for x in range(numbodyparts)]
+
+    for x in range(numbodyparts):
+        color = list(map(lambda j: int(j * 255), colorsys.hsv_to_rgb(*HSV_tuples[x])))
+
+        if probability[i, x] > threshold:
+            cv2.circle(frame, center=(np.int(xcoords[i, x] * reducefrac), np.int(ycoords[i, x] * reducefrac)), radius=4,
+                       color=(color[2], color[1], color[0]), thickness=-1)
+    return frame
+
+
+def playVideo(widthset=500, framejump=50, annotation=False, listnumber=1, tracking=False, threshold=0.9,
+              tracking2=False, numparts=9):
+    print('choose Video File')
+    root = Tk()
+    videopath = fd.askopenfilename()
+    root.withdraw()
+    videofolder = os.path.split(videopath)[0]
+    videofile = os.path.split(videopath)[1]
+
+    # create video windows
+    cv2.namedWindow('image')
+    cv2.namedWindow('controls')
+    controls = np.zeros((50, 750), np.uint8)
+    cv2.putText(controls, 'Z: play, X: pause, S: SlowDown, Q: SpeedUp, r/R: Rewind, f/F: Fastforward, P: Exit',
+                (40, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255)
+
+    # import video
+    cap = cv2.VideoCapture(videopath)
+    framenum = int(cap.get(7))
+    originalwidth = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+    reducefrac = widthset / originalwidth
+
+    # initialize parameters for video viewing
+    i = 0
+    speed = 1
+    cv2.createTrackbar('Video', 'controls', 0, int(framenum) - 1, flick)
+    cv2.setTrackbarPos('Video', 'controls', 0)
+    cv2.createTrackbar('Framerate', 'controls', 1, 200, flick)
+    cv2.setTrackbarPos('Framerate', 'controls', speed)
+    key = 'pause'
+    initialkey = {ord('z'): 'play', ord('x'): 'pause', ord('s'): 'slowdown', ord('q'): 'speedup', ord('p'): 'quit',
+                  ord('r'): 'rewind', ord('f'): 'fastforward', ord('F'): 'ffastforward', ord('R'): 'rrewind'}
+
+    if annotation:
+        cv2.namedWindow('labelbar')
+        labelbar = np.zeros((50, 1500), np.uint8)
+        cv2.putText(labelbar, behaviorLabels(listnumber)[0], (40, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255)
+        cv2.imshow('labelbar', labelbar)
+        setText = 'nan'
+        initialkey.update(behaviorLabels(listnumber)[1])
+        # try to load annotated file
+        try:
+            annotateValues = np.load(videofolder + '/' + videofile[:-4] + '_annotation_set' + str(listnumber) + '.npy')
+            annotateValues = np.array(annotateValues, dtype='<U32')
+        except:
+            annotateValues = np.array(np.full(framenum, 'nan'), dtype='<U32')
+
+    if tracking:
+        root = Tk()
+        trackingpath = fd.askopenfilename()
+        root.withdraw()
+        coords = np.loadtxt(trackingpath, delimiter=',', skiprows=3, dtype=np.float16)[:, 1:]
+        numbodyparts = int(coords.shape[1] / 3)
+        probcols = np.arange(2, coords.shape[1], 3)
+        xcoords = coords[:, probcols - 2]
+        ycoords = coords[:, probcols - 1]
+        probability = coords[:, probcols]
+
+    if tracking2:
+        ### call folder and open files automatically
+        root = Tk()
+        folder1 = fd.askdirectory()
+        root.withdraw()
+        xcoords = np.vstack(
+            (
+            np.load(folder1 + '/rat1_x.npy')[1:numparts + 1, 1:], np.load(folder1 + '/rat2_x.npy')[1:numparts + 1, 1:]))
+        ycoords = np.vstack(
+            (
+            np.load(folder1 + '/rat1_y.npy')[1:numparts + 1, 1:], np.load(folder1 + '/rat2_y.npy')[1:numparts + 1, 1:]))
+        probability = np.full(xcoords.shape, 1.0)
+        probability[xcoords == 'nan'] = 0.1
+        probability[ycoords == 'nan'] = 0.1
+        xcoords = np.array(xcoords, np.float16)
+        ycoords = np.array(ycoords, np.float16)
+
+    initialkey.update({-1: key, 27: 'exit'})
+
+    while i < framenum:
+        cv2.imshow('controls', controls)
+        try:
+            if i == framenum - 1:
+                i = 0
+
+            # load individual frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            (grabbed, frame) = cap.read(i)
+            frame = imutils.resize(frame, width=widthset)
+            cv2.putText(frame, str(i), (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255))
+            if annotation:
+                if annotateValues[i] != 'nan':
+                    cv2.putText(frame, annotateValues[i], (300, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0))
+                else:
+                    annotateValues[i] = setText
+                    cv2.putText(frame, annotateValues[i], (300, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255))
+            if tracking:
+                frame = addTracking(frame, xcoords, ycoords, probability, numbodyparts, i, reducefrac, threshold=threshold)
+            if tracking2:
+                frame = addTracking(frame, xcoords.T, ycoords.T, probability.T, numparts * 2, i, reducefrac,
+                                    threshold=threshold)
+            cv2.imshow('image', frame)
+
+            # key commands
+            initialkey[-1] = key
+            key = initialkey[cv2.waitKey(speed)]
+            if key == 'play':
+                i += 1
+                cv2.setTrackbarPos('Video', 'controls', i)
+                continue
+            elif key == 'pause':
+                i = cv2.getTrackbarPos('Video', 'controls')
+            elif key == 'quit':
+                break
+            elif (key == 'slowdown') | (key == 'speedup') | (key == 'rewind') | (key == 'fastforward') | (
+                    key == 'ffastforward') | (key == 'rrewind'):
+                key, speed, i = basicControls(key, speed, i, framejump)
+            else:
+                annotateValues[i] = key
+                setText = key
+                i = i
+                key = 'pause'
+
+        except KeyError:
+            print('Error')
+
+    cap.release()
+    cv2.destroyAllWindows()
+    if annotation:
+        np.save(videofolder + '/' + videofile[:-4] + '_annotation_set' + str(listnumber) + '.npy', annotateValues)
+
+if __name__ == "__main__":
+    playVideo(annotation=True, listnumber=5)
